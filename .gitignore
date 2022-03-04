@@ -1,0 +1,10 @@
+User_Data
+.vscode
+__pycache__
+build
+dist
+*.spec
+chromium
+screenshot*
+*.bak
+cookies.json
