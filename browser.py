@@ -1,7 +1,7 @@
 """
  * @2022-03-02 17:04:24
  * @Author       : mahf
- * @LastEditTime : 2022-03-03 18:43:25
+ * @LastEditTime : 2022-04-02 19:53:28
  * @FilePath     : /epicgames-claimer/browser.py
  * @Copyright 2022 mahf, All Rights Reserved.
 """
@@ -9,6 +9,7 @@ import asyncio
 import datetime
 import argparse
 import os
+import signal
 import sys
 import time
 import json
@@ -16,12 +17,15 @@ from getpass import getpass
 from json.decoder import JSONDecodeError
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
+import schedule
 from pyppeteer import launch, launcher
 from pyppeteer.element_handle import ElementHandle
 from pyppeteer.frame_manager import Frame
 from pyppeteer.network_manager import Request
 
 __version__ = "1.0.0"
+
+
 def get_current_time() -> str:
     """
     获取当前时间
@@ -32,7 +36,8 @@ def get_current_time() -> str:
     Examples
     Note:
     """
-    current_time_string = str(datetime.datetime.now()).split(".",maxsplit=1)[0]
+    current_time_string = str(datetime.datetime.now()
+                              ).split(".", maxsplit=1)[0]
     return current_time_string
 
 
@@ -73,6 +78,7 @@ class Browser(object):
                                    "--blink-settings=imagesEnabled=false", "--no-first-run", "--disable-gpu"],
         push_when_owned_all=False
     ) -> None:
+        self.browser = None
         self.data_dir = data_dir
         self.headless = headless
         self.browser_args = browser_args
@@ -444,7 +450,7 @@ class Browser(object):
 
     async def _wait_for_element_text_change_async(self, element: ElementHandle, text: str) -> None:
         """
-        	等待文本改变
+                等待文本改变
         Args:
             self (None):
             element (ElementHandle):
@@ -465,7 +471,7 @@ class Browser(object):
 
     async def _navigate_async(self, url: str, timeout: int = 30000, reload: bool = True) -> None:
         """
-        访问莫个网页
+        访问某个网页
         Args:
             self (None):
             url (str):
@@ -503,68 +509,9 @@ class Browser(object):
                 response_text_partial))
         return response_json
 
-    async def _login_async(self, email: str, password: str, verifacation_code: str = None, interactive: bool = True, remember_me: bool = True) -> None:
-        self.log("Start to login.", level="debug")
-        if email is None or email == "":
-            raise ValueError("Email can't be null.")
-        if password is None or password == "":
-            raise ValueError("Password can't be null.")
-        await self._navigate_async("https://www.epicgames.com/store/en-US/", timeout=self.timeout, reload=False)
-        await self._click_async("div.menu-icon", timeout=self.timeout)
-        await self._click_async("div.mobile-buttons a[href='/login']", timeout=self.timeout)
-        await self._click_async("#login-with-epic", timeout=self.timeout)
-        await self._type_async("#email", email)
-        await self._type_async("#password", password)
-        if not remember_me:
-            await self._click_async("#rememberMe")
-        await self._click_async("#sign-in[tabindex='0']", timeout=self.timeout)
-        login_result = await self._find_async(["#talon_frame_login_prod[style*=visible]", "div.MuiPaper-root[role=alert] h6[class*=subtitle1]", "input[name=code-input-0]", "#user"], timeout=self.timeout)
-        if login_result == -1:
-            raise TimeoutError("Chcek login result timeout.")
-        elif login_result == 0:
-            raise PermissionError(
-                "CAPTCHA is required for unknown reasons when logging in")
-        elif login_result == 1:
-            alert_text = await self._get_text_async("div.MuiPaper-root[role=alert] h6[class*=subtitle1]")
-            raise PermissionError("From Epic Games: {}".format(alert_text))
-        elif login_result == 2:
-            if interactive:
-                await self._type_async("input[name=code-input-0]", input("Verification code: "))
-            else:
-                await self._type_async("input[name=code-input-0]", verifacation_code)
-            await self._click_async("#continue[tabindex='0']", timeout=self.timeout)
-            verify_result = await self._find_async(["#modal-content div[role*=alert]", "#user"], timeout=self.timeout)
-            if verify_result == -1:
-                raise TimeoutError("Chcek login result timeout.")
-            elif verify_result == 0:
-                alert_text = await self._get_text_async("#modal-content div[role*=alert]")
-                raise PermissionError("From Epic Games: {}".format(alert_text))
-        self.log("Login end.", level="debug")
-
-    async def _need_login_async(self, use_api: bool = False) -> bool:
-        need_login = False
-        if use_api:
-            page_content_json = await self._get_json_async("https://www.epicgames.com/account/v2/ajaxCheckLogin")
-            need_login = page_content_json["needLogin"]
-        else:
-            await self._navigate_async("https://www.epicgames.com/store/en-US/", timeout=self.timeout)
-            if (await self._get_property_async("#user", "data-component")) == "SignedIn":
-                need_login = False
-            else:
-                need_login = True
-        self.log(f"Need Login: {need_login}.", level="debug")
-        return need_login
-
-    async def _get_authentication_method_async(self) -> Optional[str]:
-        page_content_json = await self._get_json_async("https://www.epicgames.com/account/v2/security/settings/ajaxGet")
-        if page_content_json["settings"]["enabled"] == False:
-            return None
-        else:
-            return page_content_json["settings"]["defaultMethod"]
-
     def _quit(self, signum=None, frame=None) -> None:
         """
-        	退出程序
+                退出程序
         Args:
             self (None):
             signum (None):
@@ -582,7 +529,7 @@ class Browser(object):
 
     def _screenshot(self, path: str) -> None:
         """
-        	截图
+                截图
         Args:
             self (None):
             path (str):
@@ -595,7 +542,7 @@ class Browser(object):
 
     async def _post_json_async(self, url: str, data: str, host: str = "www.epicgames.com", sleep: Union[int, float] = 2):
         """
-        	在浏览器上执行js-function  用于发送post json请求
+                在浏览器上执行js-function  用于发送post json请求
         Args:
             self (None):
             url (str):
@@ -622,7 +569,7 @@ class Browser(object):
 
     async def _post_async(self, url: str, data: dict, host: str = "www.epicgames.com", sleep: Union[int, float] = 2) -> str:
         """
-        	发送post请求
+                发送post请求
         Args:
             self (None):
             url (str):
@@ -650,17 +597,9 @@ class Browser(object):
         """.format(url))
         return response
 
-    async def _get_account_id_async(self):
-        if await self._need_login_async():
-            return None
-        else:
-            await self._navigate_async("https://www.epicgames.com/account/personal")
-            account_id = (await self._get_text_async("#personalView div.paragraph-container p")).split(": ")[1]
-            return account_id
-
     async def _get_async(self, url: str, arguments: Dict[str, str] = None, sleep: Union[int, float] = 2):
         """
-        	发送get请求
+                发送get请求
         Args:
             self (None):
             url (str):
@@ -674,7 +613,7 @@ class Browser(object):
         Note:
         """
         args = ""
-        if arguments != None:
+        if arguments is not None:
             args = "?"
             for key, value in arguments.items():
                 args += "{}={}&".format(key, value)
@@ -684,155 +623,9 @@ class Browser(object):
         await asyncio.sleep(sleep)
         return response_text
 
-    async def _get_game_infos_async(self, url_slug: str):
-        game_infos = {}
-        response = await self._get_json_async("https://store-content.ak.epicgames.com/api/en-US/content/products/{}".format(url_slug))
-        game_infos["product_name"] = response["productName"]
-        game_infos["namespace"] = response["namespace"]
-        game_infos["pages"] = []
-        for page in response["pages"]:
-            game_info_page = {}
-            if page["offer"]["hasOffer"]:
-                game_info_page["offer_id"] = page["offer"]["id"]
-                game_info_page["namespace"] = page["offer"]["namespace"]
-                game_infos["pages"].append(game_info_page)
-        return game_infos
-
-    def _get_purchase_url(self, namespace: str, offer_id: str):
-        purchase_url = "https://www.epicgames.com/store/purchase?lang=en-US&namespace={}&offers={}".format(
-            namespace, offer_id)
-        return purchase_url
-
-    async def _get_weekly_free_base_games_async(self) -> List[Item]:
-        response_text = await self._get_async("https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions")
-        response_json = json.loads(response_text)
-        base_games = []
-        for item in response_json["data"]["Catalog"]["searchStore"]["elements"]:
-            if {"path": "freegames"} in item["categories"]:
-                if item["price"]["totalPrice"]["discountPrice"] == 0 and item["price"]["totalPrice"]["originalPrice"] != 0:
-                    if item["offerType"] == "BASE_GAME":
-                        base_game = Item(
-                            item["title"], item["id"], item["namespace"], "BASE_GAME")
-                        base_games.append(base_game)
-        return base_games
-
-    async def _get_weekly_free_items_async(self, user_country: str = "CN") -> List[Item]:
-        try:
-            user_country = await self._get_user_country_async()
-        except:
-            pass
-        response_text = await self._get_async(f"https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions?country={user_country}&allowCountries={user_country}")
-        response_json = json.loads(response_text)
-        items = []
-        for item in response_json["data"]["Catalog"]["searchStore"]["elements"]:
-            if item["status"] == "ACTIVE":
-                if {"path": "freegames"} in item["categories"]:
-                    if item["price"]["totalPrice"]["discountPrice"] == 0:
-                        if item["promotions"] != None:
-                            if item["promotions"]["promotionalOffers"] != [] and item["promotions"]["promotionalOffers"] != None:
-                                items.append(Item(
-                                    item["title"], item["id"], item["namespace"], item["offerType"], item["productSlug"]))
-        return items
-
-    async def _get_free_dlcs_async(self, namespace: str) -> List[Item]:
-        args = {
-            "query": "query searchStoreQuery($namespace: String, $category: String, $freeGame: Boolean, $count: Int){Catalog{searchStore(namespace: $namespace, category: $category, freeGame: $freeGame, count: $count){elements{title id namespace}}}}",
-            "variables": '{{"namespace": "{}", "category": "digitalextras/book|addons|digitalextras/soundtrack|digitalextras/video", "freeGame": true, "count": 1000}}'.format(namespace)
-        }
-        response = await self._get_json_async("https://www.epicgames.com/graphql", args)
-        free_dlcs = []
-        for item in response["data"]["Catalog"]["searchStore"]["elements"]:
-            free_dlc = Item(item["title"], item["id"],
-                            item["namespace"], "DLC")
-            free_dlcs.append(free_dlc)
-        return free_dlcs
-
-    async def _get_free_base_game_async(self, namespace: str) -> Optional[Item]:
-        args = {
-            "query": "query searchStoreQuery($namespace: String, $category: String, $freeGame: Boolean, $count: Int){Catalog{searchStore(namespace: $namespace, category: $category, freeGame: $freeGame, count: $count){elements{title id namespace}}}}",
-            "variables": '{{"namespace": "{}", "category": "games/edition/base", "freeGame": true, "count": 1000}}'.format(namespace)
-        }
-        response = await self._get_json_async("https://www.epicgames.com/graphql", args)
-        if len(response["data"]["Catalog"]["searchStore"]["elements"]) > 0:
-            base_game_info = response["data"]["Catalog"]["searchStore"]["elements"][0]
-            base_game = Item(
-                base_game_info["title"], base_game_info["id"], base_game_info["namespace"], "BASE_GAME")
-            return base_game
-
-    async def _get_weekly_free_games_async(self) -> List[Game]:
-        free_items = await self._get_weekly_free_items_async()
-        free_games = []
-        for item in free_items:
-            if item.type == "BASE_GAME":
-                free_dlcs = await self._get_free_dlcs_async(item.namespace)
-                free_games.append(Game(item, free_dlcs))
-            elif item.type == "DLC":
-                free_base_game = await self._get_free_base_game_async(item.namespace)
-                if free_base_game != None:
-                    free_dlcs = await self._get_free_dlcs_async(free_base_game.namespace)
-                    free_games.append(Game(free_base_game, free_dlcs))
-            else:
-                free_base_game = await self._get_free_base_game_async(item.namespace)
-                if free_base_game == None:
-                    free_games.append(Game(item))
-                else:
-                    free_dlcs = await self._get_free_dlcs_async(free_base_game.namespace)
-                    free_games.append(Game(free_base_game, free_dlcs))
-        return free_games
-
-    async def _claim_async(self, item: Item) -> bool:
-        async def findx_async(items: List[Dict[str, Union[str, bool, int]]], timeout: int) -> int:
-            for _ in range(int(timeout / 1000 / (len(items)))):
-                for i in range(0, len(items)):
-                    if items[i]["exist"]:
-                        if await self._find_async(items[i]["selector"], timeout=1000, frame=self.page.frames[items[i]["frame"]]):
-                            return i
-                    else:
-                        if not await self._find_async(items[i]["selector"], timeout=1000, frame=self.page.frames[items[i]["frame"]]):
-                            return i
-            return -1
-        await self._navigate_async(item.store_url, timeout=self.timeout)
-        await self._try_click_async("div[data-component=PDPAgeGate] Button", sleep=8)
-        await self._wait_for_text_change_async("div[data-component=DesktopSticky] button[data-testid=purchase-cta-button]", "Loading")
-        if await self._get_text_async("div[data-component=DesktopSticky] button[data-testid=purchase-cta-button]") == "In Library":
-            return False
-        await self._click_async("div[data-component=DesktopSticky] button[data-testid=purchase-cta-button]:not([aria-disabled])", timeout=self.timeout)
-        await self._try_click_async("div[data-component=makePlatformUnsupportedWarningStep] button[data-component=BaseButton")
-        await self._try_click_async("#agree")
-        await self._try_click_async("div[role=dialog] button[aria-disabled=false]")
-        purchase_url = "https://www.epicgames.com" + await self._get_property_async("#webPurchaseContainer iframe", "src")
-        await self._navigate_async(purchase_url)
-        await self._click_async("#purchase-app button[class*=confirm]:not([disabled])", timeout=self.timeout)
-        await self._try_click_async("#purchaseAppContainer div.payment-overlay button.payment-btn--primary")
-        result = await findx_async(
-            [
-                {"selector": "#purchase-app div[class*=alert]",
-                    "exist": True, "frame": 0},
-                {"selector": "#talon_frame_checkout_free_prod[style*=visible]",
-                    "exist": True, "frame": 0},
-                {"selector": "#purchase-app > div", "exist": False, "frame": 0}
-            ],
-            timeout=self.timeout
-        )
-        if result == -1:
-            raise TimeoutError("Timeout when claiming")
-        elif result == 0:
-            message = await self._get_text_async("#purchase-app div[class*=alert]:not([disabled])")
-            raise PermissionError(message)
-        elif result == 1:
-            raise PermissionError(
-                "CAPTCHA is required for unknown reasons when claiming")
-        else:
-            await self._navigate_async(item.store_url, timeout=self.timeout)
-            await self._wait_for_text_change_async("div[data-component=DesktopSticky] button[data-testid=purchase-cta-button]", "Loading")
-            if not await self._get_text_async("div[data-component=DesktopSticky] button[data-testid=purchase-cta-button]") == "In Library":
-                raise RuntimeError(
-                    "An item was mistakenly considered to have been claimed")
-            return True
-
     async def _screenshot_async(self, path: str) -> None:
         """
-        	截图 协程
+                截图 协程
         Args:
             self (None):
             path (str):
@@ -848,33 +641,10 @@ class Browser(object):
         signal.signal(signal.SIGTERM, self._quit)
         if "SIGBREAK" in dir(signal):
             signal.signal(signal.SIGBREAK, self._quit)
-        if "SIGHUP" in dir(signal):
-            signal.signal(signal.SIGHUP, self._quit)
-
-    # Broken
-    async def _is_owned_async(self, offer_id: str, namespace: str) -> bool:
-        args = {
-            "query": "query launcherQuery($namespace: String!, $offerId: String!){Launcher{entitledOfferItems(namespace: $namespace, offerId: $offerId){entitledToAllItemsInOffer}}}",
-            "variables": "{{\"namespace\": \"{}\", \"offerId\": \"{}\"}}".format(namespace, offer_id)
-        }
-        response = await self._get_json_async("https://www.epicgames.com/graphql", args)
-        try:
-            owned = response["data"]["Launcher"]["entitledOfferItems"]["entitledToAllItemsInOffer"]
-        except:
-            raise ValueError("The returned data seems to be incorrect.")
-        return owned
-
-    async def _get_user_country_async(self) -> None:
-        response = await self._get_json_async("https://www.epicgames.com/account/v2/personal/ajaxGet")
-        try:
-            country = response["userInfo"]["country"]["value"]
-        except:
-            raise ValueError("The returned data seems to be incorrect.")
-        return country
 
     async def _try_get_webpage_content_async(self) -> Optional[str]:
         """
-        	尝试获取 web 内容
+                尝试获取 web 内容
         Args:
             self (None):
         Returns:
@@ -891,7 +661,7 @@ class Browser(object):
 
     def _async_auto_retry(self, retries: int, error_message: str, error_notification: str, raise_error: bool = True) -> None:
         """
-        	异步重试 装饰器
+                异步重试 装饰器
         Args:
             self (None):
             retries (int):
@@ -914,89 +684,16 @@ class Browser(object):
                             self.log(f"{e}", level="warning")
                         else:
                             self.log(f"{error_message}{e}", "error")
-                            self.claimer_notifications.notify(
-                                local_texts.NOTIFICATION_TITLE_ERROR, f"{error_notification}{e}")
+                            #这里可以增加发送到微信
                             await self._screenshot_async("screenshot.png")
                             if raise_error:
                                 raise e
             return wrapper
         return retry
 
-    async def _run_once_async(self, interactive: bool = True, email: str = None, password: str = None, verification_code: str = None, retries: int = 3, raise_error: bool = False) -> List[str]:
-        @self._async_auto_retry(retries, "Failed to open the browser: ", local_texts.NOTIFICATION_CONTENT_OPEN_BROWSER_FAILED)
-        async def run_open_browser():
-            if not self.browser_opened:
-                await self._open_browser_async()
-
-        @self._async_auto_retry(retries, "Failed to login: ", local_texts.NOTIFICATION_CONTENT_LOGIN_FAILED)
-        async def run_login(interactive: bool, email: Optional[str], password: Optional[str], verification_code: str = None):
-            if await self._need_login_async():
-                if interactive:
-                    self.log("Need login")
-                    self.claimer_notifications.notify(
-                        local_texts.NOTIFICATION_TITLE_NEED_LOGIN, local_texts.NOTIFICATION_CONTENT_NEED_LOGIN)
-                    await self._close_browser_async()
-                    email = input("Email: ")
-                    password = getpass("Password: ")
-                    await self._open_browser_async()
-                    await self._login_async(email, password)
-                    self.log("Login successful")
-                else:
-                    await self._login_async(email, password, verification_code, interactive=False)
-
-        async def run_claim() -> List[str]:
-            claimed_item_titles = []
-            owned_item_titles = []
-
-            @self._async_auto_retry(retries, "Failed to claim one item: ", local_texts.NOTIFICATION_CONTENT_CLAIM_FAILED, raise_error=False)
-            async def retried_claim(item: Item) -> bool:
-                if await self._claim_async(item):
-                    claimed_item_titles.append(item.title)
-                    self.log(f"Successfully claimed: {item.title}")
-                else:
-                    owned_item_titles.append(item.title)
-            free_items = await self._get_weekly_free_items_async()
-            item_amount = len(free_items)
-            for item in free_items:
-                await retried_claim(item)
-            if len(owned_item_titles) == item_amount:
-                self.log("All available free games are already in your library")
-                if self.push_when_owned_all:
-                    self.claimer_notifications.notify(
-                        local_texts.NOTIFICATION_TITLE_CLAIM_SUCCEED, local_texts.NOTIFICATION_CONTENT_OWNED_ALL)
-            if len(claimed_item_titles) != 0:
-                claimed_item_titles_string = ""
-                for title in claimed_item_titles:
-                    claimed_item_titles_string += f"{title}, "
-                claimed_item_titles_string = claimed_item_titles_string.rstrip(
-                    ", ")
-                self.claimer_notifications.notify(local_texts.NOTIFICATION_TITLE_CLAIM_SUCCEED,
-                                                  f"{local_texts.NOTIFICATION_CONTENT_CLAIM_SUCCEED}{claimed_item_titles_string}")
-            if len(claimed_item_titles) + len(owned_item_titles) < item_amount:
-                raise PermissionError("Failed to claim some items")
-            return claimed_item_titles
-
-        claimed_item_titles = []
-        if raise_error:
-            await run_open_browser()
-            await run_login(interactive, email, password, verification_code)
-            claimed_item_titles = await run_claim()
-        else:
-            try:
-                await run_open_browser()
-                await run_login(interactive, email, password, verification_code)
-                claimed_item_titles = await run_claim()
-            except:
-                pass
-        try:
-            await self._close_browser_async()
-        except:
-            pass
-        return claimed_item_titles
-
     async def _load_cookies_async(self, path: str) -> None:
         """
-        	读取cookies并载入
+                读取cookies并载入
         Args:
             self (None):
             path (str):
@@ -1012,7 +709,7 @@ class Browser(object):
 
     async def _save_cookies_async(self, path: str) -> None:
         """
-        	存储cookies
+                存储cookies
         Args:
             self (None):
             path (str):
@@ -1032,7 +729,7 @@ class Browser(object):
 
     async def _sleep_async(self, second: int):
         """
-        	异步暂停
+                异步暂停
         Args:
             self (None):
             second (int):
@@ -1052,25 +749,14 @@ class Browser(object):
     def close_browser(self) -> None:
         return self._loop.run_until_complete(self._close_browser_async())
 
-    def need_login(self) -> bool:
-        return self._loop.run_until_complete(self._need_login_async())
 
-    def login(self, email: str, password: str, verifacation_code: str = None, interactive: bool = True, remember_me: bool = True) -> None:
-        return self._loop.run_until_complete(self._login_async(email, password, verifacation_code, interactive, remember_me))
-
-    def get_weekly_free_games(self) -> List[Game]:
-        return self._loop.run_until_complete(self._get_weekly_free_games_async())
-
-    def run_once(self, interactive: bool = True, email: str = None, password: str = None, verification_code: str = None, retries: int = 3, raise_error: bool = False) -> List[str]:
-        return self._loop.run_until_complete(self._run_once_async(interactive, email, password, verification_code, retries, raise_error))
-
-    def scheduled_run(self, at: str, interactive: bool = True, email: str = None, password: str = None, verification_code: str = None, retries: int = 3) -> None:
-        self.add_quit_signal()
-        schedule.every().day.at(at).do(self.run_once, interactive,
-                                       email, password, verification_code, retries)
-        while True:
-            schedule.run_pending()
-            time.sleep(1)
+    # def scheduled_run(self, at: str, interactive: bool = True, email: str = None, password: str = None, verification_code: str = None, retries: int = 3) -> None:
+    #     self.add_quit_signal()
+    #     schedule.every().day.at(at).do(self.run_once, interactive,
+    #                                    email, password, verification_code, retries)
+    #     while True:
+    #         schedule.run_pending()
+    #         time.sleep(1)
 
     def load_cookies(self, path: str) -> None:
         return self._loop.run_until_complete(self._load_cookies_async(path))
@@ -1080,6 +766,9 @@ class Browser(object):
 
     def navigate(self, url: str, timeout: int = 30000, reload: bool = True) -> None:
         return self._loop.run_until_complete(self._navigate_async(url, timeout, reload))
+
+    def input_text(self,selector: str,text: str, sleep: Union[int,float] = 0):
+        return self._loop.run_until_complete(self._type_async(selector, text,sleep))
 
     def find(self, selector: str, timeout: int = None, frame: Frame = None) -> bool:
         return self._loop.run_until_complete(self._find_async(selector, timeout, frame))
@@ -1100,17 +789,6 @@ class Browser(object):
             except Exception as e:
                 print(f"{e}")
 
-
-def login(cookies_path: str) -> None:
-    claimer = EpicgamesClaimer(headless=False, sandbox=True, browser_args=[
-                               "--disable-infobars", "--no-first-run"], chromium_path=r'E:\Tools\chrome-win32\chrome.exe')
-    claimer.log("Creating user data, please log in in the browser ...")
-    claimer.navigate(
-        "https://www.epicgames.com/id/login?redirectUrl=https%3A%2F%2Fwww.epicgames.com%2Fstore", timeout=0)
-    claimer.find("#user[data-component=SignedIn]", timeout=0)
-    claimer.save_cookies(cookies_path)
-    claimer.log("Login successful")
-    claimer.close_browser()
 
 
 def get_args(run_by_main_script: bool = False) -> argparse.Namespace:
@@ -1213,15 +891,22 @@ def get_args(run_by_main_script: bool = False) -> argparse.Namespace:
     args.data_dir = "User_Data/Default" if args.interactive else "User_Data/{}".format(
         args.email)
     if args.debug_push_test:
-        test_notifications = Notifications(serverchan_sendkey=args.push_serverchan_sendkey, bark_push_url=args.push_bark_url,
-                                           bark_device_key=args.push_bark_device_key, telegram_bot_token=args.push_telegram_bot_token, telegram_chat_id=args.push_telegram_chat_id)
-        test_notifications.notify(
-            local_texts.NOTIFICATION_TITLE_TEST, local_texts.NOTIFICATION_CONTENT_TEST)
+        # test_notifications = Notifications(serverchan_sendkey=args.push_serverchan_sendkey, bark_push_url=args.push_bark_url,
+        #                                    bark_device_key=args.push_bark_device_key, telegram_bot_token=args.push_telegram_bot_token, telegram_chat_id=args.push_telegram_chat_id)
+        # test_notifications.notify(
+        #     local_texts.NOTIFICATION_TITLE_TEST, local_texts.NOTIFICATION_CONTENT_TEST)
         exit()
     if args.debug_show_args:
         print(args)
         exit()
     if args.login:
-        login("User_Data/Default/cookies.json")
+        # login("User_Data/Default/cookies.json")
         exit()
     return args
+
+
+if __name__ == "__main__":
+    browser = Browser(headless=False, sandbox=True, browser_args=["--disable-infobars", "--no-first-run"],chromium_path=r'E:\Tools\chrome-win32\chrome.exe')
+    browser.navigate("https://www.baidu.com")
+    browser.input_text("#kw", "我喜欢你")
+    browser.find("#sud",timeout=3000)
