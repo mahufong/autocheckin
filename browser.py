@@ -1,7 +1,7 @@
 """
  * @2022-03-02 17:04:24
  * @Author       : mahf
- * @LastEditTime : 2022-04-02 19:53:28
+ * @LastEditTime : 2022-04-13 19:07:28
  * @FilePath     : /epicgames-claimer/browser.py
  * @Copyright 2022 mahf, All Rights Reserved.
 """
@@ -22,7 +22,7 @@ from pyppeteer import launch, launcher
 from pyppeteer.element_handle import ElementHandle
 from pyppeteer.frame_manager import Frame
 from pyppeteer.network_manager import Request
-
+from pyppeteer.page import Page
 __version__ = "1.0.0"
 
 
@@ -76,8 +76,10 @@ class Browser(object):
         cookies: str = None,
         browser_args: List[str] = ["--disable-infobars",
                                    "--blink-settings=imagesEnabled=false", "--no-first-run", "--disable-gpu"],
-        push_when_owned_all=False
+        push_when_owned_all=False,
+        save_cookie = True
     ) -> None:
+        log("初始化浏览器")
         self.browser = None
         self.data_dir = data_dir
         self.headless = headless
@@ -97,9 +99,11 @@ class Browser(object):
         self.timeout = timeout
         self.debug = debug
         self.cookies = cookies
+        self.save_cookie = save_cookie
         self.push_when_owned_all = push_when_owned_all
-        self.page = None
+        self.page = None # 默认页
         self.open_browser()
+        self.add_quit_signal()
 
     def log(self, text: str, level: str = "info") -> None:
         """
@@ -124,16 +128,20 @@ class Browser(object):
             if self.debug:
                 print("[{} DEBUG] {}".format(localtime, text))
 
-    async def _headless_stealth_async(self):
+    async def _headless_stealth_async(self, page=None):
         """
         设置无头浏览器 用于隐藏自动化特征
         Args:
             self (None):
+            page : 要设置的窗口(网页)
         Returns:
             (None):
         Examples
         Note:
         """
+        log("set headless configure")
+        if page:
+            self.page = page
         original_user_agent = await self.page.evaluate("navigator.userAgent")
         user_agent = original_user_agent.replace("Headless", "")
         await self.page.evaluateOnNewDocument("() => {Object.defineProperty(navigator, 'webdriver', {get: () => false})}")
@@ -157,6 +165,7 @@ class Browser(object):
         Examples
         Note:
         """
+        log("打开浏览器")
         if not self.browser_opened:
             self.browser = await launch(
                 options={"args": self.browser_args, "headless": self.headless},
@@ -165,7 +174,7 @@ class Browser(object):
                 executablePath=self.chromium_path,
             )
             self.page = (await self.browser.pages())[0]
-            await self.page.setViewport({"width": 600, "height": 1000})
+            await self.page.setViewport({"width": 1366, "height": 1000})
             # Async callback functions aren't possible to use (Refer to https://github.com/pyppeteer/pyppeteer/issues/220).
             # await self.page.setRequestInterception(True)
             # self.page.on('request', self._intercept_request_async)
@@ -174,11 +183,11 @@ class Browser(object):
             self.browser_opened = True
             if self.cookies:
                 await self._load_cookies_async(self.cookies)
-            if self.data_dir is not None:
-                cookies_path = os.path.join(self.data_dir, "cookies.json")
-                if os.path.exists(cookies_path):
-                    await self._load_cookies_async(cookies_path)
-                    os.remove(cookies_path)
+            # if self.data_dir is not None:
+            #     cookies_path = os.path.join(self.data_dir, "cookies.json")
+            #     if os.path.exists(cookies_path):
+            #         await self._load_cookies_async(cookies_path)
+            #         os.remove(cookies_path)
         # await self._refresh_cookies_async()
 
     async def _refresh_cookies_async(self) -> None:
@@ -209,6 +218,25 @@ class Browser(object):
         else:
             await request.continue_()
 
+    def _get_domain(self, url: str) -> str:
+        """
+            获取主域名
+        Args:
+            self (None):
+            url (str):
+        Returns:
+            (None):
+        Examples
+        Note:
+        """
+        tmp_str = url.split('.')
+        domain = None
+        if tmp_str.__len__() > 2:
+            domain = tmp_str[1]
+        else:
+            domain = tmp_str[0]
+        return domain
+
     async def _close_browser_async(self):
         """
         关闭浏览器
@@ -219,11 +247,19 @@ class Browser(object):
         Examples
         Note:
         """
+        log("开始关闭浏览器")
         if self.browser_opened:
-            if self.cookies:
-                await self._save_cookies_async(self.cookies)
+            if self.save_cookie :
+                pages = await self.browser.pages()
+                for page in pages:
+                    domain = self._get_domain(page.url)
+                    cookie_path = os.path.join(
+                        self.data_dir, 'cookies', domain+'.json')
+                    await self._save_cookies_async(cookie_path, page)
+
             await self.browser.close()
             self.browser_opened = False
+        log("浏览器已关闭")
 
     async def _type_async(self, selector: str, text: str, sleep: Union[int, float] = 0) -> None:
         """
@@ -469,7 +505,7 @@ class Browser(object):
         raise TimeoutError("Waiting for element \"{}\" text content change failed: timeout {}ms exceeds".format(
             element, self.timeout))
 
-    async def _navigate_async(self, url: str, timeout: int = 30000, reload: bool = True) -> None:
+    async def _navigate_async(self, url: str, timeout: int = 30000, page:Page =None , needcookie: bool = False , reload: bool = True) ->Page:
         """
         访问某个网页
         Args:
@@ -477,14 +513,30 @@ class Browser(object):
             url (str):
             timeout (int):
             reload (bool):
+            page (Page): None时会创建新页面  默认页面传入  self.page
+            needcookie (bool):
         Returns:
-            (None):
+            (Page):
         Examples
         Note:
         """
-        if self.page.url == url and not reload:
-            return
-        await self.page.goto(url, options={"timeout": timeout})
+        if page is None:
+            log("打开新页面")
+            page = await self.browser.newPage()
+            if self.headless:
+                await self._headless_stealth_async()
+            if needcookie:
+                domain = self._get_domain(url)
+                cookie_path = os.path.join(self.data_dir,"cookies",domain+'.json')
+                log(f"需要载入cookie\ncookie_path : {cookie_path}")
+                if os.path.exists(cookie_path):
+                    await self._load_cookies_async(cookie_path,page)
+            await page.goto(url, options={"timeout": timeout})
+            return page
+        if page.url == url and not reload:
+            return page
+        await page.goto(url, options={"timeout": timeout})
+        return page
 
     async def _get_json_async(self, url: str, arguments: Dict[str, str] = None) -> dict:
         """
@@ -684,14 +736,14 @@ class Browser(object):
                             self.log(f"{e}", level="warning")
                         else:
                             self.log(f"{error_message}{e}", "error")
-                            #这里可以增加发送到微信
+                            # 这里可以增加发送到微信
                             await self._screenshot_async("screenshot.png")
                             if raise_error:
                                 raise e
             return wrapper
         return retry
 
-    async def _load_cookies_async(self, path: str) -> None:
+    async def _load_cookies_async(self, path: str, page=None) -> None:
         """
                 读取cookies并载入
         Args:
@@ -702,28 +754,41 @@ class Browser(object):
         Examples
         Note:
         """
+        log(f"载入cookie \n path : {path}\npage : {page}")
+        if not os.path.exists(path):
+            return 
+        if page is None:
+            page = self.page
         with open(path, "r") as cookies_file:
             cookies = cookies_file.read()
             for cookie in json.loads(cookies):
-                await self.page.setCookie(cookie)
+                await page.setCookie(cookie)
 
-    async def _save_cookies_async(self, path: str) -> None:
+    async def _save_cookies_async(self, path: str, page=None) -> None:
         """
                 存储cookies
         Args:
             self (None):
             path (str):
+            page (None): 等于 None 说明是 默认页面 page 就是 self.page
         Returns:
             (None):
         Examples
         Note:
         """
-        dir = os.path.dirname(path)
-        if not dir == "" and not os.path.exists(dir):
-            os.mkdir(dir)
+        if page is None  or page is self.page:
+            if self.cookies is None :
+                return
+            else :
+                page = self.page
+                path = self.cookies
+        log(f"存储cookie\n path : {path}\npage : {page}\nself.page : {self.page}")
+        cookie_dir = os.path.dirname(path)
+        if cookie_dir != "" and not os.path.exists(cookie_dir):
+            os.mkdir(cookie_dir)
         with open(path, "w") as cookies_file:
-            await self.page.cookies()
-            cookies = await self.page.cookies()
+            # await self.page.cookies()
+            cookies = await page.cookies()
             cookies_file.write(json.dumps(
                 cookies, separators=(",", ": "), indent=4))
 
@@ -749,7 +814,6 @@ class Browser(object):
     def close_browser(self) -> None:
         return self._loop.run_until_complete(self._close_browser_async())
 
-
     # def scheduled_run(self, at: str, interactive: bool = True, email: str = None, password: str = None, verification_code: str = None, retries: int = 3) -> None:
     #     self.add_quit_signal()
     #     schedule.every().day.at(at).do(self.run_once, interactive,
@@ -764,14 +828,21 @@ class Browser(object):
     def save_cookies(self, path: str) -> None:
         return self._loop.run_until_complete(self._save_cookies_async(path))
 
-    def navigate(self, url: str, timeout: int = 30000, reload: bool = True) -> None:
-        return self._loop.run_until_complete(self._navigate_async(url, timeout, reload))
+    def navigate(self,url: str, timeout: int=30000, page: Page=None, needcookie: bool=False, reload: bool=True):
+        return self._loop.run_until_complete(self._navigate_async(url, timeout,page,needcookie,reload))
 
-    def input_text(self,selector: str,text: str, sleep: Union[int,float] = 0):
-        return self._loop.run_until_complete(self._type_async(selector, text,sleep))
+    def input_text(self, selector: str, text: str, sleep: Union[int, float] = 0):
+        return self._loop.run_until_complete(self._type_async(selector, text, sleep))
 
     def find(self, selector: str, timeout: int = None, frame: Frame = None) -> bool:
         return self._loop.run_until_complete(self._find_async(selector, timeout, frame))
+
+    async def test_wait(self):
+        list_task=[self._navigate_async("https:www.baidu.com"),self._navigate_async("https://www.google.com"),self._navigate_async("https://www.python.org"),self._navigate_async("https://www.cloudflare.com")]
+        await asyncio.wait(list_task)
+    def test_wait_async(self):
+        return self._loop.run_until_complete(self.test_wait())
+
 
     def virtual_console(self) -> None:
         print("You can input JavaScript commands here for testing. Type exit and press Enter to quit.")
@@ -788,7 +859,6 @@ class Browser(object):
                 print(result)
             except Exception as e:
                 print(f"{e}")
-
 
 
 def get_args(run_by_main_script: bool = False) -> argparse.Namespace:
@@ -906,7 +976,12 @@ def get_args(run_by_main_script: bool = False) -> argparse.Namespace:
 
 
 if __name__ == "__main__":
-    browser = Browser(headless=False, sandbox=True, browser_args=["--disable-infobars", "--no-first-run"],chromium_path=r'E:\Tools\chrome-win32\chrome.exe')
-    browser.navigate("https://www.baidu.com")
-    browser.input_text("#kw", "我喜欢你")
-    browser.find("#sud",timeout=3000)
+    browser = Browser(data_dir="./data",save_cookie=True, headless=False, sandbox=True, browser_args=[
+                      "--disable-infobars", "--no-first-run"], chromium_path=r'E:\Tools\chrome-win32\chrome.exe')
+    # browser.navigate("https://www.baidu.com",page=browser.page)
+    # browser.navigate("https://www.google.com",needcookie=True)
+    # browser.input_text("#kw", "我喜欢你")
+    # browser.find("#sud", timeout=3000)
+
+    browser.test_wait_async()
+    browser.close_browser()
