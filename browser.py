@@ -1,7 +1,7 @@
 """
  * @2022-03-02 17:04:24
  * @Author       : mahf
- * @LastEditTime : 2022-04-13 19:07:28
+ * @LastEditTime : 2022-04-14 18:55:30
  * @FilePath     : /epicgames-claimer/browser.py
  * @Copyright 2022 mahf, All Rights Reserved.
 """
@@ -261,7 +261,7 @@ class Browser(object):
             self.browser_opened = False
         log("浏览器已关闭")
 
-    async def _type_async(self, selector: str, text: str, sleep: Union[int, float] = 0) -> None:
+    async def _type_async(self, selector: str, text: str, sleep: Union[int, float] = 0, page: Page = None) -> None:
         """
         在匹配选择器的元素上键入文本
         Args:
@@ -274,11 +274,13 @@ class Browser(object):
         Examples
         Note:
         """
-        await self.page.waitForSelector(selector)
+        if page is None:
+           page = self.page  
+        await page.waitForSelector(selector)
         await asyncio.sleep(sleep)
-        await self.page.type(selector, text)
+        await page.type(selector, text)
 
-    async def _click_async(self, selector: str, sleep: Union[int, float] = 2, timeout: int = 30000, frame: Frame = None) -> None:
+    async def _click_async(self, selector: str, sleep: Union[int, float] = 2, timeout: int = 30000, page: Page = None) -> None:
         """
         点击选择器选择的地方
         Args:
@@ -292,11 +294,11 @@ class Browser(object):
         Examples
         Note:
         """
-        if frame is None:
-            frame = self.page
-        await frame.waitForSelector(selector, options={"timeout": timeout})
+        if page is None:
+            page = self.page
+        await page.waitForSelector(selector, options={"timeout": timeout})
         await asyncio.sleep(sleep)
-        await frame.click(selector)
+        await page.click(selector)
 
     async def _get_text_async(self, selector: str, frame: Frame = None) -> str:
         """
@@ -308,14 +310,14 @@ class Browser(object):
         Returns:
             str :
         Examples
-        Note:
+        Note: 看代码返回是 dict  text ==> json ==>dict
         """
         if frame is None:
             frame = self.page
-        await self.page.waitForSelector(selector, options={"timeout": self.timeout})
-        return await (await (await self.page.querySelector(selector)).getProperty("textContent")).jsonValue()
+        await frame.waitForSelector(selector, options={"timeout": self.timeout})
+        return await (await (await frame.querySelector(selector)).getProperty("textContent")).jsonValue()
 
-    async def _get_texts_async(self, selector: str) -> List[str]:
+    async def _get_texts_async(self, selector: str,page:Page = None) -> List[str]:
         """
         返回选择器选择的多个元素的文本
         Args:
@@ -326,10 +328,12 @@ class Browser(object):
         Examples
         Note:
         """
+        if page is None:
+            page = self.page
         texts = []
         try:
-            await self.page.waitForSelector(selector)
-            for element in await self.page.querySelectorAll(selector):
+            await page.waitForSelector(selector)
+            for element in await page.querySelectorAll(selector):
                 texts.append(await (await element.getProperty("textContent")).jsonValue())
         except:
             pass
@@ -348,7 +352,7 @@ class Browser(object):
         """
         return await (await element.getProperty("textContent")).jsonValue()
 
-    async def _get_property_async(self, selector: str, property: str) -> str:
+    async def _get_property_async(self, selector: str, proper: str,page:Page=None) -> str:
         """
         返回选择元素属性的值               #不确定
         Args:
@@ -360,12 +364,14 @@ class Browser(object):
         Examples
         Note:
         """
-        await self.page.waitForSelector(selector, options={"timeout": self.timeout})
-        return await self.page.evaluate("document.querySelector('{}').getAttribute('{}')".format(selector, property))
+        if page is None:
+            page = self.page
+        await page.waitForSelector(selector, options={"timeout": self.timeout})
+        return await page.evaluate("document.querySelector('{}').getAttribute('{}')".format(selector, proper))
 
-    async def _get_links_async(self, selector: str, filter_selector: str, filter_value: str) -> List[str]:
+    async def _get_links_async(self, selector: str, filter_selector: str, filter_value: str,page:Page=None) -> List[str]:
         """
-        获取选择器选择的元素的网址
+        获取选择器选择的元素的内容  这里是url
         Args:
             self (None):
             selector (str):
@@ -376,11 +382,13 @@ class Browser(object):
         Examples
         Note:
         """
+        if page is None:
+            page = self.page
         links = []
         try:
-            await self.page.waitForSelector(selector)
-            elements = await self.page.querySelectorAll(selector)
-            judgement_texts = await self._get_texts_async(filter_selector)
+            await page.waitForSelector(selector)
+            elements = await page.querySelectorAll(selector)
+            judgement_texts = await self._get_texts_async(filter_selector,page)
         except:
             return []
         for element, judgement_text in zip(elements, judgement_texts):
@@ -391,20 +399,20 @@ class Browser(object):
 
     async def _find_async(self, selectors: Union[str, List[str]], timeout: int = None, frame: Frame = None) -> Union[bool, int]:
         """
-        寻找莫个元素
+        寻找某个元素
         Args:
             self (None):
             selectors (Union):
             timeout (int):
-            frame (Frame):
+            frame (Frame): 是Page的子类
         Returns:
             (None):
         Examples
-        Note:
+        Note: 当 selectors是 list 返回找到的第一个元素的下标
         """
         if frame is None:
             frame = self.page
-        if type(selectors) == str:
+        if isinstance(selectors,str):
             try:
                 if timeout is None:
                     timeout = 1000
@@ -412,12 +420,12 @@ class Browser(object):
                 return True
             except:
                 return False
-        elif type(selectors) == list:
+        elif isinstance(selectors, list):
             if timeout is None:
                 timeout = 300000
             for _ in range(int(timeout / 1000 / len(selectors))):
-                for i in range(len(selectors)):
-                    if await self._find_async(selectors[i], timeout=1000, frame=frame):
+                for i,item in enumerate(selectors):
+                    if await self._find_async(item, timeout=1000, frame=frame):
                         return i
             return -1
         else:
@@ -446,7 +454,7 @@ class Browser(object):
         except:
             return False
 
-    async def _get_elements_async(self, selector: str) -> Union[List[ElementHandle], None]:
+    async def _get_elements_async(self, selector: str,page:Page=None) -> Union[List[ElementHandle], None]:
         """
         获取元素
         Args:
@@ -457,13 +465,15 @@ class Browser(object):
         Examples
         Note:
         """
+        if page is None:
+            page = self.page
         try:
-            await self.page.waitForSelector(selector)
-            return await self.page.querySelectorAll(selector)
+            await page.waitForSelector(selector)
+            return await page.querySelectorAll(selector)
         except:
             return None
 
-    async def _wait_for_text_change_async(self, selector: str, text: str) -> None:
+    async def _wait_for_text_change_async(self, selector: str, text: str,page:Page=None) -> None:
         """
         等待文本改变
         Args:
@@ -475,11 +485,13 @@ class Browser(object):
         Examples
         Note:
         """
-        if await self._get_text_async(selector) != text:
+        if page is None:
+            page = self.page
+        if await self._get_text_async(selector,page) != text:
             return
         for _ in range(int(self.timeout / 1000)):
             await asyncio.sleep(1)
-            if await self._get_text_async(selector) != text:
+            if await self._get_text_async(selector,page) != text:
                 return
         raise TimeoutError("Waiting for \"{}\" text content change failed: timeout {}ms exceeds".format(
             selector, self.timeout))
@@ -538,7 +550,7 @@ class Browser(object):
         await page.goto(url, options={"timeout": timeout})
         return page
 
-    async def _get_json_async(self, url: str, arguments: Dict[str, str] = None) -> dict:
+    async def _get_json_async(self, url: str, arguments: Dict[str, str] = None,page:Page=None) -> dict:
         """
         获取访问地址返回的json
         Args:
@@ -551,7 +563,9 @@ class Browser(object):
         Examples
         Note:
         """
-        response_text = await self._get_async(url, arguments)
+        if page is None:
+            page = self.page
+        response_text = await self._get_async(url, arguments,page)
         try:
             response_json = json.loads(response_text)
         except JSONDecodeError:
@@ -579,7 +593,7 @@ class Browser(object):
             pass
         exit(1)
 
-    def _screenshot(self, path: str) -> None:
+    def _screenshot(self, path: str,page:Page=None) -> None:
         """
                 截图
         Args:
@@ -590,9 +604,12 @@ class Browser(object):
         Examples
         Note:
         """
+        if page is None:
+            page = self.page
         return self._loop.run_until_complete(self.page.screenshot({"path": path}))
+        #page.screenshot({"path": path})
 
-    async def _post_json_async(self, url: str, data: str, host: str = "www.epicgames.com", sleep: Union[int, float] = 2):
+    async def _post_json_async(self, url: str, data: str, host: str = "www.epicgames.com", sleep: Union[int, float] = 2,page:Page=None):
         """
                 在浏览器上执行js-function  用于发送post json请求
         Args:
@@ -607,10 +624,12 @@ class Browser(object):
         Examples
         Note:
         """
+        if page is None:
+            page = self.page
         await asyncio.sleep(sleep)
-        if not host in self.page.url:
-            await self._navigate_async("https://{}".format(host))
-        response = await self.page.evaluate("""
+        if not host in page.url:
+            await self._navigate_async("https://{}".format(host),page=page)
+        response = await page.evaluate("""
             xmlhttp = new XMLHttpRequest();
             xmlhttp.open("POST", "{}", true);
             xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
@@ -619,7 +638,7 @@ class Browser(object):
         """.format(url, data))
         return response
 
-    async def _post_async(self, url: str, data: dict, host: str = "www.epicgames.com", sleep: Union[int, float] = 2) -> str:
+    async def _post_async(self, url: str, data: dict, host: str = "www.epicgames.com", sleep: Union[int, float] = 2,page:Page=None) -> str:
         """
                 发送post请求
         Args:
@@ -634,13 +653,15 @@ class Browser(object):
         Examples
         Note:
         """
+        if page is None:
+            page = self.page
         await asyncio.sleep(sleep)
-        if not host in self.page.url:
-            await self._navigate_async("https://{}".format(host))
+        if not host in page.url:
+            await self._navigate_async("https://{}".format(host),page=page)
         evaluate_form = "var form = new FormData();\n"
         for key, value in data.items():
             evaluate_form += "form.append(`{}`, `{}`);\n".format(key, value)
-        response = await self.page.evaluate(evaluate_form + """
+        response = await page.evaluate(evaluate_form + """
             var form = new FormData();
             xmlhttp = new XMLHttpRequest();
             xmlhttp.open("POST", `{}`, true);
@@ -649,7 +670,7 @@ class Browser(object):
         """.format(url))
         return response
 
-    async def _get_async(self, url: str, arguments: Dict[str, str] = None, sleep: Union[int, float] = 2):
+    async def _get_async(self, url: str, arguments: Dict[str, str] = None, sleep: Union[int, float] = 2,page:Page=None):
         """
                 发送get请求
         Args:
@@ -664,18 +685,20 @@ class Browser(object):
         Examples
         Note:
         """
+        if page is None:
+            page=self.page
         args = ""
         if arguments is not None:
             args = "?"
             for key, value in arguments.items():
                 args += "{}={}&".format(key, value)
             args = args.rstrip("&")
-        await self._navigate_async(url + args)
-        response_text = await self._get_text_async("body")
+        await self._navigate_async(url + args,page=page)
+        response_text = await self._get_text_async("body",page)
         await asyncio.sleep(sleep)
         return response_text
 
-    async def _screenshot_async(self, path: str) -> None:
+    async def _screenshot_async(self, path: str,page:Page=None) -> None:
         """
                 截图 协程
         Args:
@@ -686,7 +709,9 @@ class Browser(object):
         Examples
         Note:
         """
-        await self.page.screenshot({"path": path})
+        if page is None:
+            page = self.page
+        await page.screenshot({"path": path})
 
     def add_quit_signal(self):
         signal.signal(signal.SIGINT, self._quit)
@@ -694,7 +719,7 @@ class Browser(object):
         if "SIGBREAK" in dir(signal):
             signal.signal(signal.SIGBREAK, self._quit)
 
-    async def _try_get_webpage_content_async(self) -> Optional[str]:
+    async def _try_get_webpage_content_async(self,page:Page=None) -> Optional[str]:
         """
                 尝试获取 web 内容
         Args:
@@ -704,9 +729,11 @@ class Browser(object):
         Examples
         Note:
         """
+        if page is None:
+            page = self.page
         try:
             if self.browser_opened:
-                webpage_content = await self._get_text_async('body')
+                webpage_content = await self._get_text_async('body',page)
                 return webpage_content
         except:
             pass
@@ -783,14 +810,17 @@ class Browser(object):
                 page = self.page
                 path = self.cookies
         log(f"存储cookie\n path : {path}\npage : {page}\nself.page : {self.page}")
-        cookie_dir = os.path.dirname(path)
-        if cookie_dir != "" and not os.path.exists(cookie_dir):
-            os.mkdir(cookie_dir)
-        with open(path, "w") as cookies_file:
-            # await self.page.cookies()
-            cookies = await page.cookies()
-            cookies_file.write(json.dumps(
-                cookies, separators=(",", ": "), indent=4))
+        try:
+            cookie_dir = os.path.dirname(path)
+            if cookie_dir != "" and not os.path.exists(cookie_dir):
+                os.mkdir(cookie_dir)
+            with open(path, "w") as cookies_file:
+                # await self.page.cookies()
+                cookies = await page.cookies()
+                cookies_file.write(json.dumps(
+                    cookies, separators=(",", ": "), indent=4))
+        except OSError as error:
+            log(f"触发 异常{error}")
 
     async def _sleep_async(self, second: int):
         """
@@ -838,7 +868,7 @@ class Browser(object):
         return self._loop.run_until_complete(self._find_async(selector, timeout, frame))
 
     async def test_wait(self):
-        list_task=[self._navigate_async("https:www.baidu.com"),self._navigate_async("https://www.google.com"),self._navigate_async("https://www.python.org"),self._navigate_async("https://www.cloudflare.com")]
+        list_task=[asyncio.create_task(self._navigate_async(url)) for url in ["https:www.baidu.com","https://www.google.com","https://www.python.org","https://www.cloudflare.com"]]
         await asyncio.wait(list_task)
     def test_wait_async(self):
         return self._loop.run_until_complete(self.test_wait())
