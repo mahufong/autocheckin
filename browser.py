@@ -1,7 +1,7 @@
 """
  * @2022-03-02 17:04:24
  * @Author       : mahf
- * @LastEditTime : 2022-04-15 19:50:28
+ * @LastEditTime : 2022-04-15 19:58:37
  * @FilePath     : /epicgames-claimer/browser.py
  * @Copyright 2022 mahf, All Rights Reserved.
 """
@@ -172,7 +172,7 @@ class Browser(object):
                 userDataDir=None if self.data_dir is None else os.path.abspath(
                     self.data_dir),
                 executablePath=self.chromium_path,
-                # autoClose=False
+                autoClose=False
             )
             self.page = (await self.browser.pages())[0]
             await self.page.setViewport({"width": 1366, "height": 1000})
