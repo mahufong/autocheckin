@@ -1,7 +1,7 @@
 """
  * @2022-03-02 17:04:24
  * @Author       : mahf
- * @LastEditTime : 2022-04-15 19:58:37
+ * @LastEditTime : 2022-04-15 20:55:05
  * @FilePath     : /epicgames-claimer/browser.py
  * @Copyright 2022 mahf, All Rights Reserved.
 """
@@ -172,10 +172,11 @@ class Browser(object):
                 userDataDir=None if self.data_dir is None else os.path.abspath(
                     self.data_dir),
                 executablePath=self.chromium_path,
+                defaultViewport={"width":1366,"height":768},
                 autoClose=False
             )
             self.page = (await self.browser.pages())[0]
-            await self.page.setViewport({"width": 1366, "height": 1000})
+            # await self.page.setViewport({"width": 1366, "height": 1000})
             # Async callback functions aren't possible to use (Refer to https://github.com/pyppeteer/pyppeteer/issues/220).
             # await self.page.setRequestInterception(True)
             # self.page.on('request', self._intercept_request_async)
@@ -608,7 +609,7 @@ class Browser(object):
         """
         if page is None:
             page = self.page
-        return self._loop.run_until_complete(self.page.screenshot({"path": path}))
+        return self._loop.run_until_complete(page.screenshot({"path": path}))
         #page.screenshot({"path": path})
 
     async def _post_json_async(self, url: str, data: str, host: str = "www.epicgames.com", sleep: Union[int, float] = 2,page:Page=None):
@@ -806,8 +807,9 @@ class Browser(object):
         Note:
         """
         if page is None  or page is self.page:
-            if self.cookies is None :
-                return
+            if self.cookies is None:
+                if not self.save_cookie :
+                    return            
             else :
                 page = self.page
                 path = self.cookies
@@ -871,10 +873,11 @@ class Browser(object):
         return self._loop.run_until_complete(self._find_async(selector, timeout, frame))
 
     async def test_baidu(self):
-        page = await self._navigate_async("https:www.baidu.com",page = self.page,needcookie=True)
-        await self._type_async("#kw", "i love you ")
+        page = await self._navigate_async("https://pterclub.com/",needcookie=True)
+        await self._type_async("#kw", "夜的第七章")
         await self._click_async("#su")
         await self._find_async("k",timeout=3000)
+        await self._screenshot_async("./data/ll.png")
     async def test_wait(self):
         # list_task=[asyncio.create_task(self._navigate_async(url)) for url in ["https:www.baidu.com","https://www.google.com","https://www.python.org","https://www.cloudflare.com"]]
         list_task = [asyncio.create_task(self.test_baidu())]
@@ -1016,7 +1019,7 @@ def get_args(run_by_main_script: bool = False) -> argparse.Namespace:
 
 
 if __name__ == "__main__":
-    browser = Browser(data_dir="./data",save_cookie=True, headless=False, sandbox=True, browser_args=[
+    browser = Browser(data_dir="./data", cookies="./data/cookies/baidu.json",save_cookie=True, headless=False, sandbox=True, browser_args=[
                       "--disable-infobars", "--no-first-run"], chromium_path=r'E:\Tools\chrome-win32\chrome.exe')
     # browser.navigate("https://www.baidu.com",page=browser.page)
     # browser.navigate("https://www.google.com",needcookie=True)
