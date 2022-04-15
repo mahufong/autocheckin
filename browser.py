@@ -1,7 +1,7 @@
 """
  * @2022-03-02 17:04:24
  * @Author       : mahf
- * @LastEditTime : 2022-04-14 18:55:30
+ * @LastEditTime : 2022-04-15 19:50:28
  * @FilePath     : /epicgames-claimer/browser.py
  * @Copyright 2022 mahf, All Rights Reserved.
 """
@@ -172,6 +172,7 @@ class Browser(object):
                 userDataDir=None if self.data_dir is None else os.path.abspath(
                     self.data_dir),
                 executablePath=self.chromium_path,
+                # autoClose=False
             )
             self.page = (await self.browser.pages())[0]
             await self.page.setViewport({"width": 1366, "height": 1000})
@@ -260,6 +261,7 @@ class Browser(object):
             await self.browser.close()
             self.browser_opened = False
         log("浏览器已关闭")
+
 
     async def _type_async(self, selector: str, text: str, sleep: Union[int, float] = 0, page: Page = None) -> None:
         """
@@ -842,7 +844,8 @@ class Browser(object):
         return self._loop.run_until_complete(self._open_browser_async())
 
     def close_browser(self) -> None:
-        return self._loop.run_until_complete(self._close_browser_async())
+        self._loop.run_until_complete(self._close_browser_async())
+        self._loop.close()
 
     # def scheduled_run(self, at: str, interactive: bool = True, email: str = None, password: str = None, verification_code: str = None, retries: int = 3) -> None:
     #     self.add_quit_signal()
@@ -867,8 +870,15 @@ class Browser(object):
     def find(self, selector: str, timeout: int = None, frame: Frame = None) -> bool:
         return self._loop.run_until_complete(self._find_async(selector, timeout, frame))
 
+    async def test_baidu(self):
+        page = await self._navigate_async("https:www.baidu.com",page = self.page,needcookie=True)
+        await self._type_async("#kw", "i love you ")
+        await self._click_async("#su")
+        await self._find_async("k",timeout=3000)
     async def test_wait(self):
-        list_task=[asyncio.create_task(self._navigate_async(url)) for url in ["https:www.baidu.com","https://www.google.com","https://www.python.org","https://www.cloudflare.com"]]
+        # list_task=[asyncio.create_task(self._navigate_async(url)) for url in ["https:www.baidu.com","https://www.google.com","https://www.python.org","https://www.cloudflare.com"]]
+        list_task = [asyncio.create_task(self.test_baidu())]
+
         await asyncio.wait(list_task)
     def test_wait_async(self):
         return self._loop.run_until_complete(self.test_wait())
@@ -1015,3 +1025,4 @@ if __name__ == "__main__":
 
     browser.test_wait_async()
     browser.close_browser()
+    # browser.sleep(5)
