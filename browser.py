@@ -1,7 +1,7 @@
 """
  * @2022-03-02 17:04:24
  * @Author       : mahf
- * @LastEditTime : 2022-04-15 20:55:05
+ * @LastEditTime : 2022-04-15 20:59:00
  * @FilePath     : /epicgames-claimer/browser.py
  * @Copyright 2022 mahf, All Rights Reserved.
 """
