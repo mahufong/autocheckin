@@ -8,3 +8,7 @@ chromium
 screenshot*
 *.bak
 cookies.json
+ptconfig.yaml
+logs
+captcha.py
+
