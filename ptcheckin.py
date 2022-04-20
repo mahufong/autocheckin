@@ -1,7 +1,7 @@
 """
  * @2022-04-18 16:35:05
  * @Author       : mahf
- * @LastEditTime : 2022-04-20 20:19:31
+ * @LastEditTime : 2022-04-20 20:38:32
  * @FilePath     : /epicgames-claimer/ptcheckin.py
  * @Copyright 2022 mahf, All Rights Reserved.
 """
@@ -82,6 +82,9 @@ class Ptcheckin(Browser):
         self.ptsite_list = []
         ptsite_tmp = config_yaml.read_yaml_file('./ptconfig.yaml')
         for item in ptsite_tmp:
+            # need = false 则不签到
+            if not ptsite_tmp[item].get("need",True) :
+                continue
             tmp = dict(ptsite_tmp[item])
             self.ptsite_list.append(PtSite(item, **tmp))
             logger.info(f"pt 站点 {item}")
@@ -121,9 +124,9 @@ class Ptcheckin(Browser):
                     await self._click_async('[value=登录]', page)
                     if not await self._is_logined(page):
                         raise pyppeteer.errors.TimeoutError("登陆失败")
-            except Exception as error :
+            except Exception as error:
                 # 当出现异常时 关闭页面 重新抛出异常 触发重试
-                if not page is None: 
+                if not page is None:
                     await page.close()
                 raise error
             domain = self._get_domain(page.url)

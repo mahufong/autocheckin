@@ -1,7 +1,7 @@
 """
  * @2022-03-02 17:04:24
  * @Author       : mahf
- * @LastEditTime : 2022-04-20 20:17:51
+ * @LastEditTime : 2022-04-20 20:37:49
  * @FilePath     : /epicgames-claimer/browser.py
  * @Copyright 2022 mahf, All Rights Reserved.
 """
@@ -180,7 +180,7 @@ class Browser(object):
         """
         url = urlparse(url).netloc
         if not url :
-            logger.warning(f'url 是空的')
+            logger.warning('url 是空的')
             return
         url =  url[::-1]
         tmp_str = url.split('.',2)
@@ -523,8 +523,9 @@ class Browser(object):
                     await self._load_cookies_async(cookie_path, page)
             try:
                 await page.goto(url, options={"timeout": timeout})
-            except pyppeteer.errors.PageError as error:
+            except (pyppeteer.errors.PageError,pyppeteer.errors.TimeoutError) as error:
                 await page.close()
+                logger.warning("colse page")
                 raise error
             return page
         if page.url == url and not reload:
