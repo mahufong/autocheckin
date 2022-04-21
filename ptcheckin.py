@@ -1,7 +1,7 @@
 """
  * @2022-04-18 16:35:05
  * @Author       : mahf
- * @LastEditTime : 2022-04-20 20:38:32
+ * @LastEditTime : 2022-04-21 13:12:07
  * @FilePath     : /epicgames-claimer/ptcheckin.py
  * @Copyright 2022 mahf, All Rights Reserved.
 """
@@ -56,11 +56,12 @@ class PtSite(object):
         return self.__checkin
 
 
-class PageError(Exception):
+class MyPageError(Exception):
     """页面异常类 包含那个page异常"""
 
     def __init__(self, message, page):
-        super().__init__(message)
+        super().__init__(message,page)
+        self.message = message
         self.page = page
 
 
@@ -91,14 +92,14 @@ class Ptcheckin(Browser):
 
     async def _is_logined(self, page) -> bool:
         try:
-            ret = await self._get_text_async("span.nowrap > a > b", page)
+            ret = await self._get_text_async("span.nowrap > a > b", page,30000)
             if ret == 'mahufong':
                 return True
             return False
         except pyppeteer.errors.TimeoutError:
             return False
 
-    @Browser._async_auto_retry(3, "some pt site check in failed", "test", raise_error=False)
+    @Browser._async_auto_retry(3, "some pt site check in failed",raise_error=False)
     async def _login(self, pt_data: PtSite):
         async with self.sem:
             page = None
@@ -127,8 +128,9 @@ class Ptcheckin(Browser):
             except Exception as error:
                 # 当出现异常时 关闭页面 重新抛出异常 触发重试
                 if not page is None:
+                    await page.screenshot(f"{self.screenshot_dir}/{pt_data.name}.png")
                     await page.close()
-                raise error
+                raise MyPageError(f"{pt_data.name} 签到失败", page) from error
             domain = self._get_domain(page.url)
             cookie_path = os.path.join(
                 self.data_dir, 'cookies', domain+'.json')

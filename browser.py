@@ -1,7 +1,7 @@
 """
  * @2022-03-02 17:04:24
  * @Author       : mahf
- * @LastEditTime : 2022-04-20 20:37:49
+ * @LastEditTime : 2022-04-21 12:54:24
  * @FilePath     : /epicgames-claimer/browser.py
  * @Copyright 2022 mahf, All Rights Reserved.
 """
@@ -52,6 +52,7 @@ class Browser(object):
         logger.debug("初始化浏览器")
         self.browser = None
         self.data_dir = data_dir
+        self.screenshot_dir = os.path.join(self.data_dir,'screenshots')
         self.headless = headless
         self.browser_args = browser_args
         self.sandbox = sandbox
@@ -525,7 +526,7 @@ class Browser(object):
                 await page.goto(url, options={"timeout": timeout})
             except (pyppeteer.errors.PageError,pyppeteer.errors.TimeoutError) as error:
                 await page.close()
-                logger.warning("colse page")
+                logger.warning("基本页面打开失败 colse page")
                 raise error
             return page
         if page.url == url and not reload:
@@ -720,14 +721,14 @@ class Browser(object):
             return webpage_content
 
     @classmethod
-    def _async_auto_retry(cls, retries: int, error_message: str, error_notification: str, raise_error: bool = True) -> None:
+    def _async_auto_retry(cls, retries: int, error_message: str, callback: callable=None, raise_error: bool = True) -> None:
         """
                 异步重试 装饰器
         Args:
             self (None):
             retries (int):
             error_message (str):
-            error_notification (str):
+            callback (callable): 失败之后的回调函数
             raise_error (bool):
         Returns:
             (None):
@@ -744,9 +745,11 @@ class Browser(object):
                         if i < retries - 1:
                             logger.warning(f"{error}")
                         else:
-                            logger.warning(f"{arg}{error}")
+                            logger.warning(f"{error_message}\n{error}")
                             # 这里可以增加发送到微信
-                            # await cls._screenshot_async("screenshot.png")
+                            if callback:
+                                callback()
+
                             if raise_error:
                                 raise error
             return wrapper
@@ -1011,6 +1014,6 @@ if __name__ == "__main__":
     # browser.input_text("#kw", "我喜欢你")
     # browser.find("#sud", timeout=3000)
 
-    browser.test_wait_async()
-    browser.close_browser()
+    # browser.test_wait_async()
+    # browser.close_browser()
     # browser.sleep(5)
