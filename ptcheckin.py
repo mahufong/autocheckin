@@ -1,7 +1,7 @@
 """
  * @2022-04-18 16:35:05
  * @Author       : mahf
- * @LastEditTime : 2022-04-21 13:12:07
+ * @LastEditTime : 2022-04-21 17:33:38
  * @FilePath     : /epicgames-claimer/ptcheckin.py
  * @Copyright 2022 mahf, All Rights Reserved.
 """
@@ -60,7 +60,7 @@ class MyPageError(Exception):
     """页面异常类 包含那个page异常"""
 
     def __init__(self, message, page):
-        super().__init__(message,page)
+        super().__init__(message, page)
         self.message = message
         self.page = page
 
@@ -75,16 +75,15 @@ class Ptcheckin(Browser):
         kwargs['data_dir'] = "./data"
         kwargs['save_cookie'] = True
         kwargs['headless'] = False
-        kwargs['headless'] = False
-        kwargs['sandbox'] = True
-        kwargs['browser_args'] = ["--disable-infobars", "--no-first-run"]
+        kwargs['sandbox'] = False
+        kwargs['browser_args'] = ["--disable-infobars", "--no-first-run","--disable-setuid-sandbox"]
         super().__init__(**kwargs)
         self.sem = asyncio.Semaphore(3)
         self.ptsite_list = []
         ptsite_tmp = config_yaml.read_yaml_file('./ptconfig.yaml')
         for item in ptsite_tmp:
             # need = false 则不签到
-            if not ptsite_tmp[item].get("need",True) :
+            if not ptsite_tmp[item].get("need", True):
                 continue
             tmp = dict(ptsite_tmp[item])
             self.ptsite_list.append(PtSite(item, **tmp))
@@ -92,19 +91,22 @@ class Ptcheckin(Browser):
 
     async def _is_logined(self, page) -> bool:
         try:
-            ret = await self._get_text_async("span.nowrap > a > b", page,30000)
+            ret = await self._get_text_async("span.nowrap > a > b", page, 30000)
             if ret == 'mahufong':
                 return True
             return False
         except pyppeteer.errors.TimeoutError:
             return False
 
-    @Browser._async_auto_retry(3, "some pt site check in failed",raise_error=False)
+    @logger.catch
+    @Browser._async_auto_retry(3, "some pt site check in failed", raise_error=True)
     async def _login(self, pt_data: PtSite):
         async with self.sem:
             page = None
             try:
                 page = await self._navigate_async(pt_data.url, needcookie=True)
+                print(await page.evaluate("navigator.userAgent"))
+                print(await page.evaluate("navigator.webdriver"))
                 if await self._is_logined(page):
                     logger.info(f"{pt_data.name} 已经登陆")
                     if pt_data.checkin:
@@ -128,7 +130,8 @@ class Ptcheckin(Browser):
             except Exception as error:
                 # 当出现异常时 关闭页面 重新抛出异常 触发重试
                 if not page is None:
-                    await page.screenshot(f"{self.screenshot_dir}/{pt_data.name}.png")
+                    await page.screenshot({"path" : f"{self.screenshot_dir}/{pt_data.name}.png"})
+                    logger.info("出现异常 关闭页面")
                     await page.close()
                 raise MyPageError(f"{pt_data.name} 签到失败", page) from error
             domain = self._get_domain(page.url)
