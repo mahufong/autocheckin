@@ -1,13 +1,13 @@
 """
  * @2022-03-02 17:04:24
  * @Author       : mahf
- * @LastEditTime : 2022-04-21 16:35:45
- * @FilePath     : /epicgames-claimer/browser.py
+ * @LastEditTime: 2022-05-27 18:19:01
+ * @FilePath: /epicgames-claimer/browser.py
  * @Copyright 2022 mahf, All Rights Reserved.
 """
 import argparse
 import asyncio
-# import datetime
+import datetime
 import json
 import os
 import signal
@@ -17,6 +17,8 @@ import time
 from json.decoder import JSONDecodeError
 from typing import Callable, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
+import requests
+import aiohttp
 from loguru import logger
 
 # import schedule
@@ -28,6 +30,21 @@ from pyppeteer.page import Page
 import pyppeteer.errors
 
 __version__ = "1.0.0"
+
+
+
+    
+    # async def __aenter__(self):
+    #     await self.proxy_start()
+    #     return self
+
+    # async def __aexit__(self,exc_type, exc_val, exc_tb):
+    #     await self.proxy_close()
+
+
+
+    
+
 
 
 class Browser(object):
@@ -52,7 +69,7 @@ class Browser(object):
         logger.debug("初始化浏览器")
         self.browser = None
         self.data_dir = data_dir
-        self.screenshot_dir = os.path.join(self.data_dir,'screenshots')
+        self.screenshot_dir = os.path.join(self.data_dir, 'screenshots')
         if not os.path.exists(self.screenshot_dir):
             os.mkdir(self.screenshot_dir)
         self.headless = headless
@@ -75,6 +92,7 @@ class Browser(object):
         self.save_cookie = save_cookie
         self.push_when_owned_all = push_when_owned_all
         self.page = None  # 默认页
+        self.proxy = ProxyFlare('http://127.0.0.1:8191/v1') #cf 代理
         self.open_browser()
         self.add_quit_signal()
 
@@ -117,6 +135,8 @@ class Browser(object):
         """
         logger.info("打开浏览器")
         if not self.browser_opened:
+            if '--enable-automation' in launcher.DEFAULT_ARGS:
+                launcher.DEFAULT_ARGS.remove("--enable-automation")
             self.browser = await launch(
                 options={"args": self.browser_args, "headless": self.headless},
                 userDataDir=None if self.data_dir is None else os.path.abspath(
@@ -165,10 +185,28 @@ class Browser(object):
         Examples
         Note:
         """
+        logger.info('拦截请求')
         if request.resourceType in ["image", "media", "font"]:
             await request.abort()
         else:
             await request.continue_()
+
+    async def _proxy_flare(self, request: Request,uuid:str) -> None:
+        logger.info('proxy flare ')
+
+        if request.method == 'GET':
+            status,headers,resp = await self.proxy.proxy_get(request.url, uuid)
+
+        if request.method == "POST":
+            status,headers,resp = await self.proxy.proxy_post(request.url, dict(request.postData), uuid)
+
+        if  resp  is not None:
+            ret = {"body": resp, "headers": headers, "status": status}
+            await request.respond(ret)
+        else :
+            await request.abort()
+
+
 
     def _get_domain(self, url: str) -> str:
         """
@@ -182,11 +220,11 @@ class Browser(object):
         Note:
         """
         url = urlparse(url).netloc
-        if not url :
+        if not url:
             logger.warning('url 是空的')
             return
-        url =  url[::-1]
-        tmp_str = url.split('.',2)
+        url = url[::-1]
+        tmp_str = url.split('.', 2)
         domain = tmp_str[1][::-1]
         logger.debug(f'获取主域名 {domain}')
         return domain
@@ -207,7 +245,7 @@ class Browser(object):
                 pages = await self.browser.pages()
                 for page in pages:
                     domain = self._get_domain(page.url)
-                    if domain is None :
+                    if domain is None:
                         continue
                     cookie_path = os.path.join(
                         self.data_dir, 'cookies', domain+'.json')
@@ -242,7 +280,6 @@ class Browser(object):
             logger.warning(f"没有找到选择器 {selector} error type{type(error)}")
             raise error
 
-
     async def _click_async(self, selector: str, page: Page = None, sleep: Union[int, float] = 2, timeout: int = 30000) -> None:
         """
         点击选择器选择的地方
@@ -267,7 +304,7 @@ class Browser(object):
         except pyppeteer.errors.TimeoutError:
             logger.warning(f"没有找到选择器 {selector}")
 
-    async def _get_text_async(self, selector: str, page: Page = None,timeout=10000) -> str:
+    async def _get_text_async(self, selector: str, page: Page = None, timeout=10000) -> str:
         """
         返回选择器选择的第一个元素的文本
         Args:
@@ -281,7 +318,7 @@ class Browser(object):
         """
         if page is None:
             page = self.page
-        await page.waitForSelector(selector, options={"timeout": timeout}) 
+        await page.waitForSelector(selector, options={"timeout": timeout})
         ret = await (await (await page.querySelector(selector)).getProperty("textContent")).jsonValue()
         logger.debug(f"获取元素文本\n{selector}\n{ret}")
         return ret
@@ -319,7 +356,7 @@ class Browser(object):
         Examples
         Note:
         """
-        
+
         ret = await (await element.getProperty("textContent")).jsonValue()
         logger.debug(f"获取元素文本\n{element}\n{ret}")
         return ret
@@ -339,7 +376,7 @@ class Browser(object):
         if page is None:
             page = self.page
         await page.waitForSelector(selector, options={"timeout": self.timeout})
-        ret =  await page.evaluate("document.querySelector('{}').getAttribute('{}')".format(selector, proper))
+        ret = await page.evaluate("document.querySelector('{}').getAttribute('{}')".format(selector, proper))
         logger.debug(f"获取元素属性\n{selector}\n{proper}\n{ret}")
         return ret
 
@@ -528,7 +565,7 @@ class Browser(object):
                     await self._load_cookies_async(cookie_path, page)
             try:
                 await page.goto(url, options={"timeout": timeout})
-            except (pyppeteer.errors.PageError,pyppeteer.errors.TimeoutError) as error:
+            except (pyppeteer.errors.PageError, pyppeteer.errors.TimeoutError) as error:
                 await page.close()
                 logger.warning("基本页面打开失败 colse page")
                 raise error
@@ -537,6 +574,52 @@ class Browser(object):
             return page
         await page.goto(url, options={"timeout": timeout})
         return page
+
+
+    
+
+
+    async def _pass_cloudflare(self, url: str, proxy_url: str = 'http://192.168.192.23:8191/v1'):
+
+        """
+                调用 FlareSolverr api(一个代理服务器) 过cf盾
+        Args:
+            self (None):
+            url (str):
+            page (Page):
+            proxy_url (str):
+        Returns:
+            (dict or false): 成功 返回 cookies
+        Examples
+        Note:
+        """  
+        encoded_body = {
+            "cmd": "request.get",
+            "url": f"{url}",
+            "maxTimeout": 60000,
+            #"returnOnlyCookies": True,
+        }
+
+        logger.info(f"Pass cf data : {encoded_body}")
+        try:
+            ret = requests.post(proxy_url, json=encoded_body, timeout=60)
+            if ret.status_code == 200:
+                content = ret.json()
+                logger.info(f"type {type(content)} \ncf data : {content}")
+                if content['solution']['status'] != 200 :
+                    logger.warning('flareSolverr  return flase') 
+                    return False,None
+
+                cookies = content['solution']['cookies']
+                useragent =content['solution']['userAgent']  
+                logger.info(f"userAgent : {useragent}\ncf cookies : {cookies}")
+                return cookies,useragent
+            else:
+                logger.warning(f"pass cf failed, code {ret.status_code}")
+                return False,None
+        except requests.ReadTimeout:
+            logger.warning("timeout pass cf failed")
+            return False,None
 
     async def _get_json_async(self, url: str, arguments: Dict[str, str] = None, page: Page = None) -> dict:
         """
@@ -725,7 +808,7 @@ class Browser(object):
             return webpage_content
 
     @classmethod
-    def _async_auto_retry(cls, retries: int, error_message: str, callback: callable=None, raise_error: bool = True) -> None:
+    def _async_auto_retry(cls, retries: int, error_message: str, callback: callable = None, raise_error: bool = True) -> None:
         """
                 异步重试 装饰器
         Args:
@@ -749,7 +832,8 @@ class Browser(object):
                         if i < retries - 1:
                             logger.warning(f"{error}\nerror type{type(error)}")
                         else:
-                            logger.warning(f"{error_message}\n{error}\nerror type {error}")
+                            logger.warning(
+                                f"{error_message}\n{error}\nerror type {error}")
                             # 这里可以增加发送到微信
                             if callback:
                                 callback()
@@ -780,7 +864,7 @@ class Browser(object):
             try:
                 for cookie in json.loads(cookies):
                     await page.setCookie(cookie)
-            except (JSONDecodeError,TypeError):
+            except (JSONDecodeError, TypeError):
                 logger.warning("cookies 文件是无效的")
 
     async def _save_cookies_async(self, path: str, page=None) -> None:
@@ -854,7 +938,7 @@ class Browser(object):
         return self._loop.run_until_complete(self._save_cookies_async(path))
 
     def navigate(self, url: str, timeout: int = 30000, page: Page = None, needcookie: bool = False, reload: bool = True):
-        return self._loop.run_until_complete(self._navigate_async(url, page, needcookie,timeout, reload))
+        return self._loop.run_until_complete(self._navigate_async(url, page, needcookie, timeout, reload))
 
     def input_text(self, selector: str, text: str, sleep: Union[int, float] = 0):
         return self._loop.run_until_complete(self._type_async(selector, text, sleep))
@@ -867,7 +951,7 @@ class Browser(object):
         # await self._type_async("#kw", "我爱罗", page)
         # await self._click_async("#su", page, timeout=10000)
         # await self._find_async("k", page, timeout=3000)
-        ret = await self._get_text_async("span > a b :empty",page)
+        ret = await self._get_text_async("span > a b :empty", page)
         await self._screenshot_async("./data/ll.png")
 
     async def test_wait(self):
@@ -901,9 +985,9 @@ def get_args(run_by_main_script: bool = False) -> argparse.Namespace:
         for key in args.__dict__.keys():
             env = os.environ.get(key.upper())
             if env is not None:
-                if isinstance(args.__dict__[key],int):
+                if isinstance(args.__dict__[key], int):
                     args.__setattr__(key, int(env))
-                elif isinstance(args.__dict__[key],bool):
+                elif isinstance(args.__dict__[key], bool):
                     if env == "true":
                         args.__setattr__(key, True)
                     elif env == "false":
@@ -1010,9 +1094,11 @@ def get_args(run_by_main_script: bool = False) -> argparse.Namespace:
     return args
 
 
+
+
 if __name__ == "__main__":
-    browser = Browser(data_dir="./data", cookies="./data/cookies/baidu.json", save_cookie=True, headless=False, sandbox=True, browser_args=[
-                      "--disable-infobars", "--no-first-run"], chromium_path=r'E:\Tools\chrome-win32\chrome.exe')
+    # browser = Browser(data_dir="./data", cookies="./data/cookies/baidu.json", save_cookie=True, headless=False, sandbox=True, browser_args=[
+    #                   "--disable-infobars", "--no-first-run"], chromium_path=r'E:\Tools\chrome-win32\chrome.exe')
     # browser.navigate("https://www.baidu.com",page=browser.page)
     # browser.navigate("https://www.google.com",needcookie=True)
     # browser.input_text("#kw", "我喜欢你")
@@ -1021,3 +1107,8 @@ if __name__ == "__main__":
     # browser.test_wait_async()
     # browser.close_browser()
     # browser.sleep(5)
+
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(test())
+    loop.close()
+    
